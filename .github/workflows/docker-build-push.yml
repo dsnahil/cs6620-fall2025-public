@@ -1,4 +1,4 @@
-name: Build and push to Docker Hub
+name: Build, push, and deploy to EC2
 
 on:
   push:
@@ -41,3 +41,46 @@ jobs:
             build.workflow=${{ github.workflow }}
             build.run_id=${{ github.run_id }}
             build.run_number=${{ github.run_number }}
+
+  deploy:
+    name: Deploy to EC2 via SSM
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy image to EC2 with SSM
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+
+          IMAGE="${DOCKERHUB_USERNAME}/cs6620-app:latest"
+
+          COMMANDS=$(jq -n --arg image "$IMAGE" '[
+            "set -e",
+            ("docker pull " + $image),
+            "docker stop cs6620-app || true",
+            "docker rm cs6620-app || true",
+            ("docker run -d --restart unless-stopped -p 80:5000 --name cs6620-app " + $image)
+          ]')
+
+          PARAMETERS=$(jq -n --argjson commands "$COMMANDS" '{commands: $commands}')
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy cs6620-app from GitHub Actions" \
+            --parameters "$PARAMETERS" \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM deployment command submitted: $COMMAND_ID"
