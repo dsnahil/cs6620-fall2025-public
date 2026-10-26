@@ -143,10 +143,13 @@ def serve_audio_segment():
 
 @app.route('/')
 def index():
-    """
-    Renders the main HTML page for the client-side audio player.
-    """
-    return render_template('index.html') 
+    """Render the audio player with deployment information."""
+    return render_template(
+        'index.html',
+        app_version='2.0',
+        deployment_method='GitHub Actions + AWS SSM',
+        release_id='T7E3-v2.0-automated-01'
+    )
 
 @app.route('/select_directory', methods=['POST'])
 def select_directory():
